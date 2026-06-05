@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using PainelSeguranca.Core;
@@ -28,6 +30,9 @@ namespace PainelSeguranca.UI
         private CheckBox _cbDomain, _cbPrivate, _cbPublic;
         private CheckBox _cbInteractive;
         private ListView _lvRules;
+        // Conexoes (Bloqueados / Liberados)
+        private ListView _lvBlocked, _lvAllowed;
+        private Label _lblBlockedCount, _lblAllowedCount;
         // Inicializacao
         private CheckBox _cbStartup;
         // Seguranca da interface
@@ -51,10 +56,13 @@ namespace PainelSeguranca.UI
             Font = new Font("Segoe UI", 9.5f);
             try { Icon = IconFactory.CreateTrayIcon(StatusColor.Green); } catch { }
 
-            var tabs = new TabControl { Dock = DockStyle.Fill };
+            // Multiline: mostra TODAS as abas de uma vez (sem setas de rolagem escondendo abas).
+            var tabs = new TabControl { Dock = DockStyle.Fill, Multiline = true };
             tabs.TabPages.Add(BuildAvTab());
             tabs.TabPages.Add(BuildExclusionsTab());
             tabs.TabPages.Add(BuildFwTab());
+            tabs.TabPages.Add(BuildBlockedTab());
+            tabs.TabPages.Add(BuildAllowedTab());
             tabs.TabPages.Add(BuildScanTab());
             tabs.TabPages.Add(BuildStartupTab());
             tabs.TabPages.Add(BuildSecurityTab());
@@ -330,6 +338,138 @@ namespace PainelSeguranca.UI
             try { await a(); } catch (Exception ex) { Logger.Error("Firewall (avancado)", ex); }
         }
 
+        // ----------------------------- Abas Bloqueados / Liberados -----------------------------
+
+        private TabPage BuildBlockedTab()
+        {
+            _lvBlocked = MakeConnList();
+            _lblBlockedCount = MakeCountLabel();
+            // Nesta aba os apps estao BLOQUEADOS -> a acao e LIBERAR.
+            return BuildConnTab(I18n.T("Adv.Tab.Blocked"), I18n.T("Conn.Blocked.Hint"), _lvBlocked, _lblBlockedCount,
+                I18n.T("Conn.Btn.Allow"), OnConnLiberate);
+        }
+
+        private TabPage BuildAllowedTab()
+        {
+            _lvAllowed = MakeConnList();
+            _lblAllowedCount = MakeCountLabel();
+            // Nesta aba os apps estao LIBERADOS -> a acao e BLOQUEAR.
+            return BuildConnTab(I18n.T("Adv.Tab.Allowed"), I18n.T("Conn.Allowed.Hint"), _lvAllowed, _lblAllowedCount,
+                I18n.T("Conn.Btn.Block"), OnConnBlock);
+        }
+
+        private ListView MakeConnList()
+        {
+            var lv = new ListView { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, GridLines = false, BackColor = Theme.Surface, ForeColor = Theme.Text };
+            lv.Columns.Add(I18n.T("Conn.Col.Program"), 300);
+            lv.Columns.Add(I18n.T("Adv.Fw.Col.Dir"), 80);
+            lv.Columns.Add(I18n.T("Conn.Col.Profile"), 110);
+            lv.Columns.Add(I18n.T("Conn.Col.Rule"), 220);
+            return lv;
+        }
+
+        private Label MakeCountLabel()
+        {
+            return new Label { Dock = DockStyle.Left, Width = 220, ForeColor = Theme.Subtle, TextAlign = ContentAlignment.MiddleLeft };
+        }
+
+        private TabPage BuildConnTab(string title, string hint, ListView lv, Label countLabel, string actionText, Action<ListView> action)
+        {
+            var tab = new TabPage(title) { BackColor = Theme.Background, Padding = new Padding(12) };
+
+            var lblHint = new Label { Text = hint, Dock = DockStyle.Top, Height = 30, ForeColor = Theme.Subtle, Font = new Font("Segoe UI", 8.75f) };
+
+            var bar = new Panel { Dock = DockStyle.Top, Height = 34 };
+            var refresh = new Button { Text = I18n.T("Btn.Refresh"), Dock = DockStyle.Right, Width = 150 };
+            Style.FlatButton(refresh);
+            refresh.Click += async (s, e) => await LoadConnectionsAsync();
+            bar.Controls.Add(countLabel);
+            bar.Controls.Add(refresh);
+
+            // Acao na linha selecionada (bloquear ou liberar). Duplo-clique tambem aciona.
+            var bottom = new Panel { Dock = DockStyle.Bottom, Height = 46, Padding = new Padding(0, 8, 0, 0) };
+            var btnAction = new Button { Text = actionText, Dock = DockStyle.Right, Width = 300, Height = 34 };
+            Style.FlatButton(btnAction, true);
+            btnAction.Click += (s, e) => action(lv);
+            bottom.Controls.Add(btnAction);
+            lv.DoubleClick += (s, e) => action(lv);
+
+            tab.Controls.Add(lv);
+            tab.Controls.Add(bottom);
+            tab.Controls.Add(bar);
+            tab.Controls.Add(lblHint);
+            return tab;
+        }
+
+        private void OnConnBlock(ListView lv)
+        {
+            if (lv.SelectedItems.Count == 0) { Dialogs.Info(this, I18n.T("Conn.NeedSelect")); return; }
+            string program = lv.SelectedItems[0].Text;
+            if (string.IsNullOrWhiteSpace(program)) return;
+            if (!Dialogs.Confirm(this, I18n.T("Conn.ConfirmBlock", SafeName(program)))) return;
+            _ = RunFw(async () =>
+            {
+                var r = await FirewallService.BlockAppAsync(program);
+                if (!r.Success) Dialogs.Error(this, r.Message ?? "");
+                else ShowToast?.Invoke(I18n.T("Toast.Blocked"));
+                await LoadConnectionsAsync();
+            });
+        }
+
+        private void OnConnLiberate(ListView lv)
+        {
+            if (lv.SelectedItems.Count == 0) { Dialogs.Info(this, I18n.T("Conn.NeedSelect")); return; }
+            var item = lv.SelectedItems[0];
+            string program = item.Text;
+            string ruleName = item.SubItems.Count > 3 ? item.SubItems[3].Text : "";
+            if (!Dialogs.Confirm(this, I18n.T("Conn.ConfirmAllow", SafeName(program)))) return;
+            _ = RunFw(async () =>
+            {
+                // Regras de bloqueio tem prioridade sobre as de permissao no Windows Firewall;
+                // por isso "liberar" = REMOVER a regra de bloqueio selecionada (pelo nome).
+                OperationResult r = !string.IsNullOrEmpty(ruleName)
+                    ? await FirewallService.RemoveRuleByNameAsync(ruleName)
+                    : await FirewallService.UnblockAppAsync(program);
+                if (!r.Success) Dialogs.Error(this, r.Message ?? "");
+                else ShowToast?.Invoke(I18n.T("Toast.Unblocked"));
+                await LoadConnectionsAsync();
+            });
+        }
+
+        private async Task LoadConnectionsAsync()
+        {
+            _lblBlockedCount.Text = I18n.T("Conn.Loading");
+            _lblAllowedCount.Text = I18n.T("Conn.Loading");
+            List<FirewallRuleInfo> all;
+            try { all = await FirewallService.ListConnectionAppRulesAsync(); }
+            catch (Exception ex) { Logger.Error("Listar conexoes", ex); all = new List<FirewallRuleInfo>(); }
+
+            FillConn(_lvBlocked, all.Where(x => x.IsBlock));
+            FillConn(_lvAllowed, all.Where(x => x.IsAllow));
+            _lblBlockedCount.Text = I18n.T("Conn.Count", _lvBlocked.Items.Count);
+            _lblAllowedCount.Text = I18n.T("Conn.Count", _lvAllowed.Items.Count);
+        }
+
+        private void FillConn(ListView lv, IEnumerable<FirewallRuleInfo> items)
+        {
+            lv.BeginUpdate();
+            lv.Items.Clear();
+            foreach (var r in items.OrderBy(x => SafeName(x.Program), StringComparer.OrdinalIgnoreCase))
+            {
+                var it = new ListViewItem(r.Program);
+                it.SubItems.Add(r.Direction);
+                it.SubItems.Add(r.Profile);
+                it.SubItems.Add(r.DisplayName);
+                lv.Items.Add(it);
+            }
+            lv.EndUpdate();
+        }
+
+        private static string SafeName(string p)
+        {
+            try { return Path.GetFileName(p ?? ""); } catch { return p ?? ""; }
+        }
+
         // ----------------------------- Aba Verificacoes -----------------------------
 
         private TabPage BuildScanTab()
@@ -476,6 +616,7 @@ namespace PainelSeguranca.UI
             await LoadAvStateAsync();
             await LoadExclusionsAsync();
             await LoadFwAsync();
+            await LoadConnectionsAsync();
             await LoadStartupAsync();
             LoadSecurityState();
         }

@@ -14,6 +14,10 @@ namespace PainelSeguranca.Services
         public string Program { get; set; }
         public string Direction { get; set; }
         public string Action { get; set; }
+        public string Profile { get; set; }
+
+        public bool IsBlock { get { return (Action ?? "").IndexOf("Block", StringComparison.OrdinalIgnoreCase) >= 0; } }
+        public bool IsAllow { get { return (Action ?? "").IndexOf("Allow", StringComparison.OrdinalIgnoreCase) >= 0; } }
     }
 
     /// <summary>
@@ -195,6 +199,46 @@ namespace PainelSeguranca.Services
                     Program = parts[1].Trim(),
                     Direction = DirectionText(parts[2].Trim()),
                     Action = parts[3].Trim()
+                });
+            }
+            return list;
+        }
+
+        /// <summary>
+        /// Lista TODAS as regras de firewall ATIVAS que tem um programa (.exe) associado,
+        /// com sua acao (Block/Allow). Usado pelas abas "Bloqueados" e "Liberados".
+        ///
+        /// Eficiente: faz apenas DUAS consultas em massa (filtros de aplicativo + regras) e
+        /// junta pela InstanceID em memoria, em vez de uma chamada por regra.
+        /// </summary>
+        public static async Task<List<FirewallRuleInfo>> ListConnectionAppRulesAsync()
+        {
+            var list = new List<FirewallRuleInfo>();
+            string cmd =
+                "$m=@{}; " +
+                "Get-NetFirewallApplicationFilter -PolicyStore ActiveStore -ErrorAction SilentlyContinue | " +
+                "ForEach-Object { if ($_.Program) { $m[$_.InstanceID]=$_.Program } }; " +
+                "Get-NetFirewallRule -PolicyStore ActiveStore -Enabled True -ErrorAction SilentlyContinue | " +
+                "Where-Object { $m.ContainsKey($_.InstanceID) } | ForEach-Object { " +
+                "\"$($_.DisplayName)`t$($m[$_.InstanceID])`t$($_.Direction)`t$($_.Action)`t$($_.Profile)\" }";
+            var r = await ProcessRunner.RunPowerShellAsync(cmd, 120000);
+            if (!r.Success) return list;
+
+            foreach (var line in SplitLines(r.StdOut))
+            {
+                var parts = line.Split('\t');
+                if (parts.Length < 5) continue;
+                string action = parts[3].Trim();
+                // So nos interessam regras de permitir/bloquear (ignora outras acoes).
+                if (action.IndexOf("Block", StringComparison.OrdinalIgnoreCase) < 0 &&
+                    action.IndexOf("Allow", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                list.Add(new FirewallRuleInfo
+                {
+                    DisplayName = parts[0].Trim(),
+                    Program = parts[1].Trim(),
+                    Direction = DirectionText(parts[2].Trim()),
+                    Action = action,
+                    Profile = parts[4].Trim()
                 });
             }
             return list;
