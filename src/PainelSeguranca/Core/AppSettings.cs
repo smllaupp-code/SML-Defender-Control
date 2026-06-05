@@ -81,6 +81,24 @@ namespace PainelSeguranca.Core
             set { SetBool("InteractiveFirewall", value); }
         }
 
+        /// <summary>
+        /// True depois que o app ja tentou configurar o autostart pela primeira vez.
+        /// Enquanto false, o app liga o autostart por padrao (e um app de seguranca e deve
+        /// iniciar com o Windows). Depois disso, respeita a escolha do usuario.
+        /// </summary>
+        public bool AutostartInitialized
+        {
+            get { return GetBool("AutostartInitialized", false); }
+            set { SetBool("AutostartInitialized", value); }
+        }
+
+        /// <summary>Preferencia do usuario para iniciar com o Windows. Padrao: ligado.</summary>
+        public bool AutostartEnabled
+        {
+            get { return GetBool("AutostartEnabled", true); }
+            set { SetBool("AutostartEnabled", value); }
+        }
+
         // --- Acesso generico ---
 
         public string Get(string key, string fallback)

@@ -59,6 +59,16 @@ namespace PainelSeguranca
 
             Logger.Info("Painel de Seguranca iniciado. Elevado=" + ElevationHelper.IsElevated());
 
+            // ---------- Iniciar com o Windows ----------
+            // Em background, garante que a Tarefa Agendada de autostart exista e aponte para
+            // este .exe. Na primeira execucao liga por padrao; depois respeita a escolha do
+            // usuario. So tenta quando elevado (criar a tarefa exige admin).
+            if (ElevationHelper.IsElevated())
+            {
+                try { _ = Services.AutostartService.EnsureAutostartAsync(); }
+                catch (Exception ex) { Logger.Error("Falha ao garantir autostart no boot", ex); }
+            }
+
             // ---------- Tratamento global de excecoes (UI nunca derruba o app) ----------
             Application.ThreadException += (s, e) =>
             {

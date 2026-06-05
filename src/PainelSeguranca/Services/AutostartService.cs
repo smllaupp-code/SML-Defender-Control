@@ -71,17 +71,106 @@ namespace PainelSeguranca.Services
         {
             return Task.Run(() =>
             {
+                Tuple<bool, string> r;
                 try
                 {
-                    if (enabled) return CreateTask();
-                    return DeleteTask();
+                    r = enabled ? CreateTask() : DeleteTask();
                 }
                 catch (Exception ex)
                 {
                     Logger.Error("Falha no autostart (COM). Tentando fallback schtasks.", ex);
-                    return enabled ? CreateTaskFallback() : DeleteTaskFallback();
+                    r = enabled ? CreateTaskFallback() : DeleteTaskFallback();
                 }
+
+                // Persiste a preferencia quando a operacao deu certo, para o EnsureAutostart
+                // respeitar a escolha do usuario nos proximos boots.
+                if (r.Item1)
+                {
+                    AppSettings.Instance.AutostartEnabled = enabled;
+                    AppSettings.Instance.AutostartInitialized = true;
+                }
+                return r;
             });
+        }
+
+        /// <summary>
+        /// Garante que o autostart reflita a preferencia, em TODO boot:
+        ///  - 1a execucao (nunca inicializado): liga por padrao — e um app de seguranca e
+        ///    deve iniciar com o Windows como um dos primeiros.
+        ///  - Preferencia ligada mas a tarefa sumiu ou aponta para outro caminho (ex.: .exe
+        ///    movido/reinstalado): recria a tarefa.
+        ///  - Preferencia desligada: nao faz nada.
+        /// Exige privilegios de admin para criar a tarefa (o app ja roda elevado).
+        /// </summary>
+        public static Task EnsureAutostartAsync()
+        {
+            return Task.Run(() => EnsureAutostart());
+        }
+
+        public static void EnsureAutostart()
+        {
+            try
+            {
+                var settings = AppSettings.Instance;
+
+                if (!settings.AutostartInitialized)
+                {
+                    var r = CreateTaskSafe();
+                    settings.AutostartInitialized = true;
+                    settings.AutostartEnabled = r.Item1;
+                    if (r.Item1) Logger.Info("Autostart habilitado por padrao na primeira execucao.");
+                    else Logger.Warn("Nao foi possivel habilitar autostart por padrao: " + r.Item2);
+                    return;
+                }
+
+                if (settings.AutostartEnabled && !IsTaskHealthy())
+                {
+                    var r = CreateTaskSafe();
+                    Logger.Info("Autostart re-sincronizado (tarefa ausente ou desatualizada). ok=" + r.Item1);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("EnsureAutostart falhou", ex);
+            }
+        }
+
+        private static Tuple<bool, string> CreateTaskSafe()
+        {
+            try { return CreateTask(); }
+            catch (Exception ex)
+            {
+                Logger.Error("CreateTask (COM) falhou em EnsureAutostart. Fallback schtasks.", ex);
+                return CreateTaskFallback();
+            }
+        }
+
+        /// <summary>True se a tarefa existe E sua acao aponta para o .exe atual.</summary>
+        private static bool IsTaskHealthy()
+        {
+            try
+            {
+                dynamic service = CreateService();
+                if (service == null) return SchtasksExists(); // fallback nao valida o caminho
+                dynamic folder = service.GetFolder("\\");
+                dynamic task;
+                try { task = folder.GetTask(TaskName); }
+                catch { return false; } // GetTask lanca se nao existir
+                if (task == null) return false;
+                try
+                {
+                    string current = (string)task.Definition.Actions.Item(1).Path;
+                    return string.Equals(current, ExePath, StringComparison.OrdinalIgnoreCase);
+                }
+                catch
+                {
+                    return true; // existe; nao deu para ler o caminho — considera saudavel
+                }
+            }
+            catch
+            {
+                return SchtasksExists();
+            }
         }
 
         // ---------------- Caminho principal: COM ----------------
@@ -123,12 +212,16 @@ namespace PainelSeguranca.Services
             def.Settings.Enabled = true;
             def.Settings.Hidden = false;
             def.Settings.MultipleInstances = 2;              // TASK_INSTANCES_IGNORE_NEW
+            // Prioridade alta: como e um app de seguranca, deve subir entre os primeiros no boot.
+            // Escala do Agendador: 0 (mais alta) a 10 (mais baixa); padrao 7. 4 = acima do normal.
+            try { def.Settings.Priority = 4; } catch { }
             try { def.Settings.DisallowStartOnRemoteAppSession = false; } catch { }
 
             // Gatilho: ao fazer logon do usuario atual.
             dynamic trigger = def.Triggers.Create(TASK_TRIGGER_LOGON);
             trigger.Enabled = true;
             trigger.UserId = CurrentUser;
+            try { trigger.Delay = "PT0S"; } catch { } // sem atraso apos o logon
 
             // Acao: executar o proprio .exe.
             dynamic action = def.Actions.Create(TASK_ACTION_EXEC);

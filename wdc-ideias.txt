@@ -1,0 +1,15 @@
+ATENÇÃO:Bugs que o usuário achou. Consertando o bug você deve editar esse texto e colocando  o começo de cada bug ou frase: --->CORRIGIDO<--- , caso não consiga corrigir deve sugerir uma opção
+viável para correção ou upgrade, ou então falar o motivo de não conseguir corrigir.
+Caso contraria marque com XXXXX e diga o motivo.
+
+
+--->CORRIGIDO<--- Bug: aplicativo não está inicando com o Windows, deve ter a opção de iniciar com o Windows,
+isso é prioridade, e por fazer parte de um sistema de segurança, deve ser um dos primeiros
+a ser iniciados.
+   Correção: o autostart agora é LIGADO POR PADRÃO na primeira execução (via Tarefa Agendada
+   elevada, sem prompt de UAC no boot). A cada início o app re-sincroniza a tarefa: se ela
+   tiver sumido ou o .exe foi movido/reinstalado, ele recria sozinho. A tarefa recebeu
+   prioridade alta (Priority=4, acima do normal) e gatilho de logon sem atraso (Delay PT0S),
+   para subir entre os primeiros. A opção continua na aba "Inicialização" (tela Avançado)
+   para o usuário desligar se quiser — a escolha é respeitada nos próximos boots.
+
