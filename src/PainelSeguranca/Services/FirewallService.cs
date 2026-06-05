@@ -178,6 +178,37 @@ namespace PainelSeguranca.Services
             return r2.Success ? OperationResult.Ok() : OperationResult.Fail(I18n.T("Err.Generic", r2.CombinedError));
         }
 
+        /// <summary>
+        /// LIBERA um app removendo TODAS as regras de BLOQUEIO (entrada e saida, de qualquer
+        /// origem/grupo) associadas ao .exe informado. Usado pela aba "Bloqueados" da tela
+        /// principal, onde podem aparecer bloqueios que NAO foram criados por este painel.
+        /// So remove regras cuja acao e "Block" — nunca mexe em regras de permissao.
+        /// </summary>
+        public static async Task<OperationResult> AllowAppAsync(string exePath)
+        {
+            string p = Escape(exePath);
+            string cmd =
+                "$ids=@(); " +
+                "Get-NetFirewallApplicationFilter -PolicyStore ActiveStore -ErrorAction SilentlyContinue | " +
+                "Where-Object { $_.Program -eq '" + p + "' } | ForEach-Object { $ids += $_.InstanceID }; " +
+                "if ($ids.Count -gt 0) { " +
+                "Get-NetFirewallRule -PolicyStore ActiveStore -ErrorAction SilentlyContinue | " +
+                "Where-Object { $ids -contains $_.InstanceID -and $_.Action -eq 'Block' } | " +
+                "Remove-NetFirewallRule -ErrorAction Stop }";
+            var r = await ProcessRunner.RunPowerShellAsync(cmd, 60000);
+            if (r.Success)
+            {
+                Logger.Info("App liberado no firewall (qualquer origem): " + exePath);
+                return OperationResult.Ok();
+            }
+
+            // Fallback: tenta remover as regras criadas por este painel + por programa via netsh.
+            await UnblockAppAsync(exePath);
+            var r2 = await ProcessRunner.RunAsync("netsh.exe",
+                "advfirewall firewall delete rule name=all program=\"" + exePath + "\"", 30000);
+            return r2.Success ? OperationResult.Ok() : OperationResult.Fail(I18n.T("Err.Generic", r.CombinedError));
+        }
+
         /// <summary>Lista as regras de app criadas por este painel (grupo PainelSeguranca).</summary>
         public static async Task<List<FirewallRuleInfo>> ListAppRulesAsync()
         {

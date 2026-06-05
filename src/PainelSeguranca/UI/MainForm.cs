@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using PainelSeguranca.Core;
@@ -8,9 +11,12 @@ using PainelSeguranca.Services;
 namespace PainelSeguranca.UI
 {
     /// <summary>
-    /// TELA PRINCIPAL — simples, para usuario leigo: status grande + poucos botoes grandes,
-    /// cada um com 1 linha de explicacao. Recursos avancados ficam na janela "Avancado".
-    /// A UI nunca trava: toda chamada pesada (WMI/PowerShell/processos) roda em background.
+    /// TELA PRINCIPAL — simples e direta para usuario leigo. O foco do app esta a UM clique:
+    ///   1) ver/controlar quais apps o firewall esta BLOQUEANDO na internet, e
+    ///   2) escolher arquivos/pastas que o Defender NAO deve verificar (exclusoes).
+    /// Ambos ficam VISIVEIS na tela principal (sem senha), em abas grandes. As acoes de
+    /// protecao (pausar, ligar/desligar, verificar, atualizar) ficam na aba "Protecao".
+    /// A UI nunca trava: toda chamada pesada (WMI/PowerShell/firewall) roda em background.
     /// </summary>
     public sealed class MainForm : Form
     {
@@ -20,13 +26,13 @@ namespace PainelSeguranca.UI
 
         public bool AllowClose { get; set; }
 
+        // --- Status (topo) ---
         private readonly Panel _statusPanel = new Panel();
         private readonly PictureBox _statusIcon = new PictureBox();
         private readonly Label _statusTitle = new Label();
         private readonly Label _statusSub = new Label();
         private readonly Label _infoAv = new Label();
         private readonly Label _infoFw = new Label();
-        private readonly Label _infoSig = new Label();
 
         private readonly Panel _bannerPanel = new Panel();
         private readonly Label _bannerLabel = new Label();
@@ -36,12 +42,16 @@ namespace PainelSeguranca.UI
         private readonly Panel _pausePanel = new Panel();
         private readonly Label _pauseLabel = new Label();
 
-        private readonly FlowLayoutPanel _tiles = new FlowLayoutPanel();
+        // --- Abas ---
+        private ListView _lvBlocked;        // apps bloqueados na internet
+        private Label _lblBlockedCount;
+        private ListView _lvExclude;        // arquivos/pastas excluidos do Defender
+        private Label _lblExcludeCount;
+
+        // --- Aba Protecao (tiles) ---
+        private FlowLayoutPanel _tiles;
         private ActionTile _tilePause;
         private ActionTile _tileToggle;
-        private ActionTile _tileTrust;
-        private ActionTile _tileFolder;
-        private ActionTile _tileBlock;
         private ActionTile _tileScan;
         private ActionTile _tileUpdate;
 
@@ -63,8 +73,8 @@ namespace PainelSeguranca.UI
         {
             Text = I18n.T("App.Title");
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(520, 720);
-            MinimumSize = new Size(480, 600);
+            ClientSize = new Size(560, 720);
+            MinimumSize = new Size(520, 600);
             BackColor = Theme.Background;
             ForeColor = Theme.Text;
             Font = new Font("Segoe UI", 9.75f);
@@ -72,37 +82,37 @@ namespace PainelSeguranca.UI
 
             // --- Status grande (topo) ---
             _statusPanel.Dock = DockStyle.Top;
-            _statusPanel.Height = 140;
+            _statusPanel.Height = 132;
             _statusPanel.BackColor = Theme.Surface;
-            _statusPanel.Padding = new Padding(18, 14, 18, 12);
+            _statusPanel.Padding = new Padding(18, 12, 18, 10);
 
-            _statusIcon.Size = new Size(72, 72);
+            _statusIcon.Size = new Size(64, 64);
             _statusIcon.Location = new Point(18, 22);
             _statusIcon.SizeMode = PictureBoxSizeMode.Zoom;
             _statusIcon.BackColor = Color.Transparent;
 
-            _statusTitle.Location = new Point(104, 22);
+            _statusTitle.Location = new Point(96, 20);
             _statusTitle.AutoSize = false;
-            _statusTitle.Size = new Size(390, 38);
-            _statusTitle.Font = new Font("Segoe UI", 20f, FontStyle.Bold);
+            _statusTitle.Size = new Size(430, 36);
+            _statusTitle.Font = new Font("Segoe UI", 19f, FontStyle.Bold);
             _statusTitle.Text = I18n.T("Status.Loading");
             _statusTitle.ForeColor = Theme.Text;
 
-            _statusSub.Location = new Point(106, 64);
+            _statusSub.Location = new Point(98, 60);
             _statusSub.AutoSize = false;
-            _statusSub.Size = new Size(390, 22);
-            _statusSub.Font = new Font("Segoe UI", 9.75f);
+            _statusSub.Size = new Size(430, 20);
+            _statusSub.Font = new Font("Segoe UI", 9.5f);
             _statusSub.ForeColor = Theme.Subtle;
 
-            _infoAv.Location = new Point(106, 90);
+            _infoAv.Location = new Point(98, 84);
             _infoAv.AutoSize = false;
-            _infoAv.Size = new Size(390, 18);
+            _infoAv.Size = new Size(430, 18);
             _infoAv.Font = new Font("Segoe UI", 8.75f);
             _infoAv.ForeColor = Theme.Subtle;
 
-            _infoFw.Location = new Point(106, 108);
+            _infoFw.Location = new Point(98, 102);
             _infoFw.AutoSize = false;
-            _infoFw.Size = new Size(390, 18);
+            _infoFw.Size = new Size(430, 18);
             _infoFw.Font = new Font("Segoe UI", 8.75f);
             _infoFw.ForeColor = Theme.Subtle;
 
@@ -143,21 +153,11 @@ namespace PainelSeguranca.UI
             _pauseLabel.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
             _pausePanel.Controls.Add(_pauseLabel);
 
-            // --- Lista de botoes grandes ---
-            _tiles.Dock = DockStyle.Fill;
-            _tiles.FlowDirection = FlowDirection.TopDown;
-            _tiles.WrapContents = false;
-            _tiles.AutoScroll = true;
-            _tiles.Padding = new Padding(16, 14, 16, 14);
-            _tiles.BackColor = Theme.Background;
-
-            _tilePause = AddTile(I18n.T("Btn.Pause"), I18n.T("Btn.Pause.Sub"), "⏸", OnPauseTile);
-            _tileToggle = AddTile(I18n.T("Btn.Toggle.Off"), I18n.T("Btn.Toggle.Sub"), "🛡", OnToggleTile);
-            _tileTrust = AddTile(I18n.T("Btn.Trust"), I18n.T("Btn.Trust.Sub"), "✓", OnTrustFile);
-            _tileFolder = AddTile(I18n.T("Btn.ExcludeFolder"), I18n.T("Btn.ExcludeFolder.Sub"), "📁", OnExcludeFolder);
-            _tileBlock = AddTile(I18n.T("Btn.BlockApp"), I18n.T("Btn.BlockApp.Sub"), "🌐", OnBlockApp);
-            _tileScan = AddTile(I18n.T("Btn.QuickScan"), I18n.T("Btn.QuickScan.Sub"), "🔍", OnQuickScan);
-            _tileUpdate = AddTile(I18n.T("Btn.Update"), I18n.T("Btn.Update.Sub"), "⤓", OnUpdate);
+            // --- Abas (foco do app) ---
+            var tabs = new TabControl { Dock = DockStyle.Fill, Padding = new Point(14, 6) };
+            tabs.TabPages.Add(BuildBlockedTab());
+            tabs.TabPages.Add(BuildExcludeTab());
+            tabs.TabPages.Add(BuildProtectTab());
 
             // Menu de pausa (15 min / 1 hora / ate reiniciar)
             _pauseMenu.Items.Add(I18n.T("Btn.Pause.15"), null, (s, e) => DoPause(TimeSpan.FromMinutes(15), false));
@@ -177,14 +177,109 @@ namespace PainelSeguranca.UI
             footer.Controls.Add(btnRefresh);
 
             // Ordem de docking (de baixo p/ cima do z-order)
-            Controls.Add(_tiles);
+            Controls.Add(tabs);
             Controls.Add(footer);
             Controls.Add(_pausePanel);
             Controls.Add(_bannerPanel);
             Controls.Add(_statusPanel);
 
             Resize += (s, e) => LayoutTiles();
-            LayoutTiles();
+        }
+
+        // ----------------------------- Aba: Bloqueados na internet -----------------------------
+
+        private TabPage BuildBlockedTab()
+        {
+            var tab = new TabPage(I18n.T("Main.Tab.Blocked")) { BackColor = Theme.Background, Padding = new Padding(12) };
+
+            var hint = new Label { Text = I18n.T("Main.Blocked.Hint"), Dock = DockStyle.Top, Height = 38, ForeColor = Theme.Subtle, Font = new Font("Segoe UI", 8.75f) };
+
+            _lvBlocked = new ListView { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, HeaderStyle = ColumnHeaderStyle.Nonclickable, BackColor = Theme.Surface, ForeColor = Theme.Text };
+            _lvBlocked.Columns.Add(I18n.T("Conn.Col.Program"), 360);
+            _lvBlocked.Columns.Add(I18n.T("Adv.Fw.Col.Dir"), 100);
+            _lvBlocked.DoubleClick += (s, e) => OnAllowSelected();
+
+            var bottom = new Panel { Dock = DockStyle.Bottom, Height = 50, Padding = new Padding(0, 10, 0, 0) };
+            var btnAllow = new Button { Text = I18n.T("Main.Blocked.Allow"), Dock = DockStyle.Right, Width = 200, Height = 36 };
+            var btnAdd = new Button { Text = I18n.T("Main.Blocked.Add"), Dock = DockStyle.Left, Width = 200, Height = 36 };
+            Style.FlatButton(btnAllow, true);
+            Style.FlatButton(btnAdd);
+            btnAllow.Click += (s, e) => OnAllowSelected();
+            btnAdd.Click += (s, e) => OnBlockNewApp();
+            bottom.Controls.Add(btnAllow);
+            bottom.Controls.Add(btnAdd);
+
+            var countBar = new Panel { Dock = DockStyle.Top, Height = 22 };
+            _lblBlockedCount = new Label { Dock = DockStyle.Fill, ForeColor = Theme.Subtle, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 8.75f) };
+            countBar.Controls.Add(_lblBlockedCount);
+
+            tab.Controls.Add(_lvBlocked);
+            tab.Controls.Add(bottom);
+            tab.Controls.Add(countBar);
+            tab.Controls.Add(hint);
+            return tab;
+        }
+
+        // ----------------------------- Aba: Nao verificar (exclusoes) -----------------------------
+
+        private TabPage BuildExcludeTab()
+        {
+            var tab = new TabPage(I18n.T("Main.Tab.Exclude")) { BackColor = Theme.Background, Padding = new Padding(12) };
+
+            var hint = new Label { Text = I18n.T("Main.Exclude.Hint"), Dock = DockStyle.Top, Height = 38, ForeColor = Theme.Subtle, Font = new Font("Segoe UI", 8.75f) };
+
+            _lvExclude = new ListView { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, HeaderStyle = ColumnHeaderStyle.Nonclickable, BackColor = Theme.Surface, ForeColor = Theme.Text };
+            _lvExclude.Columns.Add(I18n.T("Main.Exclude.Col"), 470);
+            _lvExclude.DoubleClick += (s, e) => OnRemoveExclusion();
+
+            var bottom = new Panel { Dock = DockStyle.Bottom, Height = 50, Padding = new Padding(0, 10, 0, 0) };
+            var btnRemove = new Button { Text = I18n.T("Main.Exclude.Remove"), Dock = DockStyle.Right, Width = 170, Height = 36 };
+            var btnAddFolder = new Button { Text = I18n.T("Main.Exclude.AddFolder"), Dock = DockStyle.Left, Width = 160, Height = 36 };
+            var btnAddFile = new Button { Text = I18n.T("Main.Exclude.AddFile"), Dock = DockStyle.Left, Width = 160, Height = 36 };
+            Style.FlatButton(btnRemove);
+            Style.FlatButton(btnAddFolder, true);
+            Style.FlatButton(btnAddFile, true);
+            btnRemove.Click += (s, e) => OnRemoveExclusion();
+            btnAddFolder.Click += (s, e) => OnAddFolderExclusion();
+            btnAddFile.Click += (s, e) => OnAddFileExclusion();
+            bottom.Controls.Add(btnRemove);
+            bottom.Controls.Add(btnAddFolder);
+            bottom.Controls.Add(btnAddFile);
+
+            var countBar = new Panel { Dock = DockStyle.Top, Height = 22 };
+            _lblExcludeCount = new Label { Dock = DockStyle.Fill, ForeColor = Theme.Subtle, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 8.75f) };
+            countBar.Controls.Add(_lblExcludeCount);
+
+            tab.Controls.Add(_lvExclude);
+            tab.Controls.Add(bottom);
+            tab.Controls.Add(countBar);
+            tab.Controls.Add(hint);
+            return tab;
+        }
+
+        // ----------------------------- Aba: Protecao (acoes) -----------------------------
+
+        private TabPage BuildProtectTab()
+        {
+            var tab = new TabPage(I18n.T("Main.Tab.Protect")) { BackColor = Theme.Background, Padding = new Padding(4) };
+
+            _tiles = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoScroll = true,
+                Padding = new Padding(12, 12, 12, 12),
+                BackColor = Theme.Background
+            };
+
+            _tilePause = AddTile(I18n.T("Btn.Pause"), I18n.T("Btn.Pause.Sub"), "⏸", OnPauseTile);
+            _tileToggle = AddTile(I18n.T("Btn.Toggle.Off"), I18n.T("Btn.Toggle.Sub"), "🛡", OnToggleTile);
+            _tileScan = AddTile(I18n.T("Btn.QuickScan"), I18n.T("Btn.QuickScan.Sub"), "🔍", OnQuickScan);
+            _tileUpdate = AddTile(I18n.T("Btn.Update"), I18n.T("Btn.Update.Sub"), "⤓", OnUpdate);
+
+            tab.Controls.Add(_tiles);
+            return tab;
         }
 
         private ActionTile AddTile(string title, string sub, string glyph, EventHandler handler)
@@ -197,6 +292,7 @@ namespace PainelSeguranca.UI
 
         private void LayoutTiles()
         {
+            if (_tiles == null) return;
             int w = _tiles.ClientSize.Width - _tiles.Padding.Horizontal - 4;
             if (w < 100) return;
             foreach (Control c in _tiles.Controls)
@@ -216,12 +312,17 @@ namespace PainelSeguranca.UI
                 var agg = new AggregateStatus { Defender = defTask.Result, Firewall = fwTask.Result };
                 _last = agg;
                 ApplyStatus(agg);
+                FillExclusions(defTask.Result);
                 OnStatusColor?.Invoke(agg.Color);
             }
             catch (Exception ex)
             {
                 Logger.Error("Falha ao atualizar status", ex);
             }
+
+            // Lista de bloqueados pode ser mais lenta (varre o firewall): atualiza em separado.
+            await LoadBlockedAsync();
+            LayoutTiles();
         }
 
         private void ApplyStatus(AggregateStatus agg)
@@ -229,8 +330,7 @@ namespace PainelSeguranca.UI
             var def = agg.Defender;
             var fw = agg.Firewall;
 
-            // Icone e titulo
-            try { _statusIcon.Image = IconFactory.CreateShieldBitmap(72, agg.Color); } catch { }
+            try { _statusIcon.Image = IconFactory.CreateShieldBitmap(64, agg.Color); } catch { }
 
             switch (agg.Level)
             {
@@ -251,7 +351,6 @@ namespace PainelSeguranca.UI
                     break;
             }
 
-            // Linhas de info
             string avState = def.Available
                 ? (def.RealtimeActive ? I18n.T("Field.On") : I18n.T("Field.Off"))
                 : "-";
@@ -284,19 +383,154 @@ namespace PainelSeguranca.UI
             }
 
             // Botao desligar/ligar reflete o estado atual
-            if (def.RealtimeActive)
-            {
-                _tileToggle.SetTitle(I18n.T("Btn.Toggle.Off"));
-            }
-            else
-            {
-                _tileToggle.SetTitle(I18n.T("Btn.Toggle.On"));
-            }
+            _tileToggle.SetTitle(def.RealtimeActive ? I18n.T("Btn.Toggle.Off") : I18n.T("Btn.Toggle.On"));
 
             UpdatePauseUi();
         }
 
-        // ----------------------------- Acoes dos botoes -----------------------------
+        // ----------------------------- Bloqueados na internet -----------------------------
+
+        private async Task LoadBlockedAsync()
+        {
+            if (_lvBlocked == null) return;
+            _lblBlockedCount.Text = I18n.T("Conn.Loading");
+            List<FirewallRuleInfo> all;
+            try { all = await FirewallService.ListConnectionAppRulesAsync(); }
+            catch (Exception ex) { Logger.Error("Listar bloqueados", ex); all = new List<FirewallRuleInfo>(); }
+
+            // Junta entrada+saida do mesmo programa numa unica linha (usuario leigo nao precisa ver as duas).
+            var blocked = all.Where(x => x.IsBlock)
+                             .GroupBy(x => (x.Program ?? "").Trim(), StringComparer.OrdinalIgnoreCase)
+                             .Select(g => g.First())
+                             .OrderBy(x => SafeName(x.Program), StringComparer.OrdinalIgnoreCase)
+                             .ToList();
+
+            _lvBlocked.BeginUpdate();
+            _lvBlocked.Items.Clear();
+            foreach (var r in blocked)
+            {
+                var it = new ListViewItem(r.Program) { Tag = r };
+                it.SubItems.Add(r.Direction);
+                _lvBlocked.Items.Add(it);
+            }
+            _lvBlocked.EndUpdate();
+
+            _lblBlockedCount.Text = blocked.Count == 0
+                ? I18n.T("Main.Blocked.Empty")
+                : I18n.T("Conn.Count", blocked.Count);
+        }
+
+        private void OnBlockNewApp()
+        {
+            using (var ofd = new OpenFileDialog { Title = I18n.T("Dlg.SelectExe"), Filter = "Programas (*.exe)|*.exe|*.*|*.*", CheckFileExists = true })
+            {
+                if (ofd.ShowDialog(this) != DialogResult.OK) return;
+                string exe = ofd.FileName;
+                _ = RunBusy(async () =>
+                {
+                    if (await FirewallService.IsAppBlockedAsync(exe))
+                    {
+                        ShowToast?.Invoke(I18n.T("Toast.Blocked"));
+                    }
+                    else
+                    {
+                        if (!Dialogs.Confirm(this, I18n.T("Conn.ConfirmBlock", SafeName(exe)))) return;
+                        var r = await FirewallService.BlockAppAsync(exe);
+                        Report(r, I18n.T("Toast.Blocked"));
+                    }
+                    await LoadBlockedAsync();
+                });
+            }
+        }
+
+        private void OnAllowSelected()
+        {
+            if (_lvBlocked.SelectedItems.Count == 0) { Dialogs.Info(this, I18n.T("Conn.NeedSelect")); return; }
+            var item = _lvBlocked.SelectedItems[0];
+            string program = item.Text;
+            if (!Dialogs.Confirm(this, I18n.T("Conn.ConfirmAllow", SafeName(program)))) return;
+            _ = RunBusy(async () =>
+            {
+                // "Liberar" = remover a(s) regra(s) de bloqueio deste programa (entrada+saida, qualquer origem).
+                var r = await FirewallService.AllowAppAsync(program);
+                Report(r, I18n.T("Toast.Unblocked"));
+                await LoadBlockedAsync();
+            });
+        }
+
+        /// <summary>Permite a bandeja disparar o fluxo guiado de bloquear/liberar app.</summary>
+        public void InvokeBlockAppFlow()
+        {
+            OnBlockNewApp();
+        }
+
+        // ----------------------------- Nao verificar (exclusoes) -----------------------------
+
+        private void FillExclusions(DefenderStatus def)
+        {
+            if (_lvExclude == null) return;
+            var paths = (def != null && def.ExclusionPath != null) ? def.ExclusionPath : new List<string>();
+
+            _lvExclude.BeginUpdate();
+            _lvExclude.Items.Clear();
+            foreach (var p in paths.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+                _lvExclude.Items.Add(new ListViewItem(p));
+            _lvExclude.EndUpdate();
+
+            _lblExcludeCount.Text = paths.Count == 0
+                ? I18n.T("Main.Exclude.Empty")
+                : I18n.T("Conn.Count", paths.Count);
+        }
+
+        private void OnAddFileExclusion()
+        {
+            using (var ofd = new OpenFileDialog { Title = I18n.T("Dlg.SelectFile"), CheckFileExists = true })
+            {
+                if (ofd.ShowDialog(this) != DialogResult.OK) return;
+                string path = ofd.FileName;
+                _ = RunBusy(async () =>
+                {
+                    var r = await DefenderService.AddPathExclusionAsync(path);
+                    Report(r, I18n.T("Main.Exclude.AddFile"));
+                    await RefreshAsync();
+                });
+            }
+        }
+
+        private void OnAddFolderExclusion()
+        {
+            using (var fbd = new FolderBrowserDialog { Description = I18n.T("Dlg.SelectFolder") })
+            {
+                if (fbd.ShowDialog(this) != DialogResult.OK) return;
+                string path = fbd.SelectedPath;
+                _ = RunBusy(async () =>
+                {
+                    var r = await DefenderService.AddPathExclusionAsync(path);
+                    Report(r, I18n.T("Main.Exclude.AddFolder"));
+                    await RefreshAsync();
+                });
+            }
+        }
+
+        private void OnRemoveExclusion()
+        {
+            if (_lvExclude.SelectedItems.Count == 0) { Dialogs.Info(this, I18n.T("Main.NeedSelectExcl")); return; }
+            string path = _lvExclude.SelectedItems[0].Text;
+            if (!Dialogs.Confirm(this, I18n.T("Confirm.RemoveExclusion"))) return;
+            _ = RunBusy(async () =>
+            {
+                var r = await DefenderService.RemovePathExclusionAsync(path);
+                Report(r, I18n.T("Main.Exclude.Remove"));
+                await RefreshAsync();
+            });
+        }
+
+        private static string SafeName(string p)
+        {
+            try { return Path.GetFileName(p ?? ""); } catch { return p ?? ""; }
+        }
+
+        // ----------------------------- Acoes de protecao -----------------------------
 
         private void OnPauseTile(object sender, EventArgs e)
         {
@@ -355,71 +589,6 @@ namespace PainelSeguranca.UI
             }
         }
 
-        private void OnTrustFile(object sender, EventArgs e)
-        {
-            using (var ofd = new OpenFileDialog { Title = I18n.T("Dlg.SelectFile"), CheckFileExists = true })
-            {
-                if (ofd.ShowDialog(this) != DialogResult.OK) return;
-                string path = ofd.FileName;
-                _ = RunBusy(async () =>
-                {
-                    // Arquivo confiavel: se for .exe, excluimos como processo; sempre como caminho.
-                    var r = await DefenderService.AddPathExclusionAsync(path);
-                    if (r.Success && path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-                        await DefenderService.AddProcessExclusionAsync(System.IO.Path.GetFileName(path));
-                    Report(r, I18n.T("Btn.Trust"));
-                    await RefreshAsync();
-                });
-            }
-        }
-
-        private void OnExcludeFolder(object sender, EventArgs e)
-        {
-            using (var fbd = new FolderBrowserDialog { Description = I18n.T("Dlg.SelectFolder") })
-            {
-                if (fbd.ShowDialog(this) != DialogResult.OK) return;
-                string path = fbd.SelectedPath;
-                _ = RunBusy(async () =>
-                {
-                    var r = await DefenderService.AddPathExclusionAsync(path);
-                    Report(r, I18n.T("Btn.ExcludeFolder"));
-                    await RefreshAsync();
-                });
-            }
-        }
-
-        /// <summary>Permite a bandeja disparar o fluxo guiado de bloquear/liberar app.</summary>
-        public void InvokeBlockAppFlow()
-        {
-            OnBlockApp(this, EventArgs.Empty);
-        }
-
-        private void OnBlockApp(object sender, EventArgs e)
-        {
-            using (var ofd = new OpenFileDialog { Title = I18n.T("Dlg.SelectExe"), Filter = "Programas (*.exe)|*.exe|*.*|*.*", CheckFileExists = true })
-            {
-                if (ofd.ShowDialog(this) != DialogResult.OK) return;
-                string exe = ofd.FileName;
-                _ = RunBusy(async () =>
-                {
-                    bool blocked = await FirewallService.IsAppBlockedAsync(exe);
-                    if (blocked)
-                    {
-                        if (!Dialogs.Confirm(this, I18n.T("BlockApp.AlreadyBlocked"))) return;
-                        var r = await FirewallService.UnblockAppAsync(exe);
-                        Report(r, I18n.T("Toast.Unblocked"));
-                    }
-                    else
-                    {
-                        if (!Dialogs.Confirm(this, I18n.T("BlockApp.NotBlocked"))) return;
-                        var r = await FirewallService.BlockAppAsync(exe);
-                        Report(r, I18n.T("Toast.Blocked"));
-                    }
-                    await RefreshAsync();
-                });
-            }
-        }
-
         private void OnQuickScan(object sender, EventArgs e)
         {
             ShowToast?.Invoke(I18n.T("Toast.ScanStarted"));
@@ -457,10 +626,7 @@ namespace PainelSeguranca.UI
         private void OnPauseChanged()
         {
             if (IsDisposed) return;
-            try
-            {
-                BeginInvoke((Action)UpdatePauseUi);
-            }
+            try { BeginInvoke((Action)UpdatePauseUi); }
             catch { }
         }
 
