@@ -1,3 +1,6 @@
+# Config local do Claude Code / harness (nao faz parte do projeto)
+.claude/
+
 # Build
 [Bb]in/
 [Oo]bj/
