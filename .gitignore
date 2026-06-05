@@ -1,0 +1,23 @@
+# Build
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+.vs/
+
+# Saida do instalador (vai como artefato de Release no GitHub, nao no repo)
+dist/
+
+# Logs/artefatos locais
+*.log
+
+# ------------------------------------------------------------------
+# Assinatura de codigo
+# ------------------------------------------------------------------
+# A CHAVE PRIVADA do certificado NUNCA deve ir para o repositorio.
+# Ela fica no repositorio de certificados do Windows (Cert:\CurrentUser\My),
+# nao em arquivo. Se algum dia voce exportar um .pfx, NAO comite:
+*.pfx
+*.snk
+# O .cer (parte publica) pode ser commitado, mas por padrao ignoramos a pasta:
+signing/
