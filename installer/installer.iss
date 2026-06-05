@@ -6,7 +6,7 @@
 ; ============================================================================
 
 #define AppName "SML Defender Control"
-#define AppVersion "1.1.0"
+#define AppVersion "1.2.0"
 #define AppPublisher "SML"
 #define AppExeName "SMLDefenderControl.exe"
 #define AppId "{{B7A1F4C2-1E3D-4A6B-9C8E-0D2F5A7B9C11}"
