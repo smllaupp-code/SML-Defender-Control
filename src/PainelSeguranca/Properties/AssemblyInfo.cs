@@ -24,6 +24,6 @@ using System.Runtime.InteropServices;
 [assembly: Guid("b7a1f4c2-1e3d-4a6b-9c8e-0d2f5a7b9c11")]
 
 // Versao do produto e do arquivo.
-[assembly: AssemblyVersion("1.3.0.0")]
-[assembly: AssemblyFileVersion("1.3.0.0")]
-[assembly: AssemblyInformationalVersion("1.3.0")]
+[assembly: AssemblyVersion("1.3.1.0")]
+[assembly: AssemblyFileVersion("1.3.1.0")]
+[assembly: AssemblyInformationalVersion("1.3.1")]

@@ -14,6 +14,20 @@ a ser iniciados.
    para o usuário desligar se quiser — a escolha é respeitada nos próximos boots.
 
 
+--->CORRIGIDO<--- Bug: ao terminar a instalação aparece o erro "Incapaz de executar o arquivo:
+C:\Program Files\SML Defender Control\SMLDefenderControl.exe — CreateProcess falhou; código 740.
+A operação solicitada requer elevação."
+   Causa: o app exige administrador (requireAdministrator no manifesto). No Inno Setup, as
+   entradas [Run] marcadas como "postinstall" (a opção "Iniciar o app" no fim) são lançadas
+   com o token NÃO-elevado do usuário original — diferente das demais entradas [Run]. Ao usar
+   CreateProcess num .exe que pede elevação sem token elevado, o Windows retorna o código 740
+   (ERROR_ELEVATION_REQUIRED).
+   Correção: a entrada [Run] passou a usar a flag "shellexec" (ShellExecuteEx no lugar de
+   CreateProcess). O ShellExecute honra o manifesto requireAdministrator e dispara o UAC para
+   elevar o app — exatamente o comportamento esperado de um lançamento manual. Versão do
+   instalador e do app subiu para 1.3.1.
+
+
 IDEIA FUTURA (não é bug; registrada a pedido do usuário): submenu nativo no menu CURTO do Windows 11.
    Situação atual: o menu de contexto "SML Defender" (Bloquear/Desbloquear na internet e
    Adicionar/Remover das exclusões do Defender) é criado por REGISTRO pelo instalador

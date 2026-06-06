@@ -6,7 +6,7 @@
 ; ============================================================================
 
 #define AppName "SML Defender Control"
-#define AppVersion "1.3.0"
+#define AppVersion "1.3.1"
 #define AppPublisher "SML"
 #define AppExeName "SMLDefenderControl.exe"
 #define AppId "{{B7A1F4C2-1E3D-4A6B-9C8E-0D2F5A7B9C11}"
@@ -86,8 +86,11 @@ Root: HKCR; Subkey: "Directory\shell\SMLDefender\shell\02remexcl"; ValueType: st
 Root: HKCR; Subkey: "Directory\shell\SMLDefender\shell\02remexcl\command"; ValueType: string; ValueData: """{app}\{#AppExeName}"" --rem-excl ""%1"""
 
 [Run]
-; Oferece abrir o app ao final (ja elevado).
-Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+; Oferece abrir o app ao final. O app exige elevacao (requireAdministrator) e as
+; entradas postinstall sao lancadas com o token NAO-elevado do usuario original;
+; por isso usamos "shellexec" (ShellExecuteEx) para que o manifesto seja honrado e
+; o UAC eleve o app. Sem isso, CreateProcess falha com codigo 740 (requer elevacao).
+Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: postinstall skipifsilent shellexec
 
 [UninstallRun]
 ; Estes comandos rodam ANTES de remover os arquivos, com o desinstalador elevado.
