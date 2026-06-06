@@ -13,3 +13,19 @@ a ser iniciados.
    para subir entre os primeiros. A opção continua na aba "Inicialização" (tela Avançado)
    para o usuário desligar se quiser — a escolha é respeitada nos próximos boots.
 
+
+IDEIA FUTURA (não é bug; registrada a pedido do usuário): submenu nativo no menu CURTO do Windows 11.
+   Situação atual: o menu de contexto "SML Defender" (Bloquear/Desbloquear na internet e
+   Adicionar/Remover das exclusões do Defender) é criado por REGISTRO pelo instalador
+   (classes exefile\shell para .exe e Directory\shell para pastas; pastas só têm exclusões,
+   pois o firewall não aceita pasta). Cada item chama o próprio .exe em modo silencioso
+   ("SMLDefenderControl.exe --block ""%1""" etc., já implementado no CliHandler).
+   No Windows 10 o submenu aparece direto no botão direito. No Windows 11 ele aparece em
+   "Mostrar mais opções" (Shift+F10), porque verbos baseados em registro NÃO entram no menu
+   curto novo do Win11. (Obs.: a chave/valor "Extended" faz o CONTRÁRIO do desejado — ela
+   esconde o item, deixando-o só no menu estendido; por isso NÃO foi usada.)
+   Upgrade viável para aparecer NATIVAMENTE no menu curto do Win11: implementar um handler
+   COM IExplorerCommand empacotado em um MSIX (sparse package) assinado. É um projeto à parte
+   e bem mais complexo (COM + empacotamento MSIX + assinatura), por isso ficou como tarefa
+   futura a avaliar por custo/benefício. O comportamento atual (menu clássico) está correto e
+   funcional nas duas versões do Windows.

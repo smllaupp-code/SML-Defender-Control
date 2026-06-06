@@ -17,8 +17,20 @@ namespace PainelSeguranca
         private static TrayApplicationContext _ctx;
 
         [STAThread]
-        private static void Main()
+        private static void Main(string[] args)
         {
+            // ---------- Modo silencioso (CLI) ----------
+            // Se o .exe for chamado COM argumentos, desvia para o CliHandler ANTES de
+            // qualquer Application.Run, Mutex de instancia unica ou criacao de Form.
+            // O CliHandler executa a operacao, mostra um MessageBox e encerra o processo
+            // (Environment.Exit) — nunca retorna. Sem argumentos, o fluxo abaixo (uso
+            // normal) permanece exatamente como era.
+            if (args != null && args.Length > 0)
+            {
+                CliHandler.Run(args); // nunca retorna
+                return;               // rede de seguranca
+            }
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 

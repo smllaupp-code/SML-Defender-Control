@@ -6,7 +6,7 @@
 ; ============================================================================
 
 #define AppName "SML Defender Control"
-#define AppVersion "1.2.0"
+#define AppVersion "1.3.0"
 #define AppPublisher "SML"
 #define AppExeName "SMLDefenderControl.exe"
 #define AppId "{{B7A1F4C2-1E3D-4A6B-9C8E-0D2F5A7B9C11}"
@@ -52,6 +52,38 @@ Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
+
+[Registry]
+; ============================================================================
+;  Menu de contexto do Windows Explorer (submenu em cascata "SML Defender").
+;  Como o instalador roda elevado (PrivilegesRequired=admin), HKCR grava em
+;  HKLM\Software\Classes -> vale para TODOS os usuarios da maquina.
+;  O submenu usa o padrao: chave-pai com MUIVerb + valor "subcommands" vazio,
+;  o que faz o shell enumerar a subchave "shell" para montar a cascata.
+;  uninsdeletekey nas chaves-pai remove toda a arvore na desinstalacao.
+; ============================================================================
+
+; --- Arquivos .exe (classe exefile): Bloquear / Desbloquear / Exclusoes ---
+Root: HKCR; Subkey: "exefile\shell\SMLDefender"; ValueType: string; ValueName: "MUIVerb"; ValueData: "SML Defender"; Flags: uninsdeletekey
+Root: HKCR; Subkey: "exefile\shell\SMLDefender"; ValueType: string; ValueName: "Icon"; ValueData: """{app}\{#AppExeName}"",0"
+Root: HKCR; Subkey: "exefile\shell\SMLDefender"; ValueType: string; ValueName: "subcommands"; ValueData: ""
+Root: HKCR; Subkey: "exefile\shell\SMLDefender\shell\01block"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Bloquear na internet"
+Root: HKCR; Subkey: "exefile\shell\SMLDefender\shell\01block\command"; ValueType: string; ValueData: """{app}\{#AppExeName}"" --block ""%1"""
+Root: HKCR; Subkey: "exefile\shell\SMLDefender\shell\02unblock"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Desbloquear na internet"
+Root: HKCR; Subkey: "exefile\shell\SMLDefender\shell\02unblock\command"; ValueType: string; ValueData: """{app}\{#AppExeName}"" --unblock ""%1"""
+Root: HKCR; Subkey: "exefile\shell\SMLDefender\shell\03addexcl"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Adicionar as exclusoes do Defender"
+Root: HKCR; Subkey: "exefile\shell\SMLDefender\shell\03addexcl\command"; ValueType: string; ValueData: """{app}\{#AppExeName}"" --add-excl ""%1"""
+Root: HKCR; Subkey: "exefile\shell\SMLDefender\shell\04remexcl"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Remover das exclusoes do Defender"
+Root: HKCR; Subkey: "exefile\shell\SMLDefender\shell\04remexcl\command"; ValueType: string; ValueData: """{app}\{#AppExeName}"" --rem-excl ""%1"""
+
+; --- Pastas (classe Directory): SO exclusoes (firewall nao aceita pasta) ---
+Root: HKCR; Subkey: "Directory\shell\SMLDefender"; ValueType: string; ValueName: "MUIVerb"; ValueData: "SML Defender"; Flags: uninsdeletekey
+Root: HKCR; Subkey: "Directory\shell\SMLDefender"; ValueType: string; ValueName: "Icon"; ValueData: """{app}\{#AppExeName}"",0"
+Root: HKCR; Subkey: "Directory\shell\SMLDefender"; ValueType: string; ValueName: "subcommands"; ValueData: ""
+Root: HKCR; Subkey: "Directory\shell\SMLDefender\shell\01addexcl"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Adicionar as exclusoes do Defender"
+Root: HKCR; Subkey: "Directory\shell\SMLDefender\shell\01addexcl\command"; ValueType: string; ValueData: """{app}\{#AppExeName}"" --add-excl ""%1"""
+Root: HKCR; Subkey: "Directory\shell\SMLDefender\shell\02remexcl"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Remover das exclusoes do Defender"
+Root: HKCR; Subkey: "Directory\shell\SMLDefender\shell\02remexcl\command"; ValueType: string; ValueData: """{app}\{#AppExeName}"" --rem-excl ""%1"""
 
 [Run]
 ; Oferece abrir o app ao final (ja elevado).

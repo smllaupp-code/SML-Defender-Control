@@ -52,6 +52,7 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="Core\AppSettings.cs" />
+    <Compile Include="Core\CliHandler.cs" />
     <Compile Include="Core\ElevationHelper.cs" />
     <Compile Include="Core\I18n.cs" />
     <Compile Include="Core\IconFactory.cs" />
